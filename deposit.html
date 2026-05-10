@@ -140,7 +140,7 @@
               <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:16px;margin-bottom:16px;font-size:.85rem;color:var(--text-muted);line-height:1.7;">
                 For bank transfer details and account information, please contact our support team. We will provide you with the exact bank details and a unique reference number for your transfer.
               </div>
-              <button class="btn btn-primary btn-full btn-lg" onclick="goToSupport()">
+              <button class="btn btn-primary btn-full btn-lg" onclick="if(typeof smartsupp==='function'){smartsupp('chat:open');}">
                 <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right:7px;vertical-align:middle;"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
                 Contact Support for Bank Details
               </button>
