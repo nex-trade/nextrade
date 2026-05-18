@@ -437,29 +437,27 @@ var fileDataBack    = null;
 var currentUid      = null;
 
 // Compress image to under 500KB before saving
+
 function compressImage(file, callback) {
-  var maxSize = 480 * 1024; // 480KB target
+  var maxSize = 300 * 1024; // 300KB hard target
   var reader = new FileReader();
   reader.onload = function(e) {
     var img = new Image();
     img.onload = function() {
       var canvas = document.createElement('canvas');
       var ctx = canvas.getContext('2d');
-      var quality = 0.8;
-      var scale = 1;
-      // Scale down if image is very large
-      var maxDim = 1200;
-      if (img.width > maxDim || img.height > maxDim) {
-        scale = Math.min(maxDim / img.width, maxDim / img.height);
-      }
+      // Force max dimension to 800px
+      var maxDim = 800;
+      var scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
       canvas.width  = Math.floor(img.width  * scale);
       canvas.height = Math.floor(img.height * scale);
       ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      // Reduce quality until under maxSize
-      var result = canvas.toDataURL('image/jpeg', quality);
-      while (result.length > maxSize && quality > 0.3) {
-        quality -= 0.1;
-        result = canvas.toDataURL('image/jpeg', quality);
+      // Start at 0.6 quality and keep reducing until under maxSize
+      var quality = 0.6;
+      var result  = canvas.toDataURL('image/jpeg', quality);
+      while (result.length > maxSize && quality > 0.1) {
+        quality = parseFloat((quality - 0.05).toFixed(2));
+        result  = canvas.toDataURL('image/jpeg', quality);
       }
       callback(result);
     };
