@@ -451,54 +451,69 @@ function startCopyTrading(traderName, userId, allocation, pricesObj) {
   var sessionKey = userId + '_' + traderName.replace(/ /g,'_');
   if (_copyIntervals[sessionKey]) return;
 
-  // Load user config from Firestore then start engine
   db.collection('users').doc(userId).get().then(function(snap) {
-    var userData    = snap.exists ? snap.data() : {};
-    var maxTrades   = userData.copyMaxTrades !== undefined ? userData.copyMaxTrades : 5;
-    var rrRatio     = userData.copyRR        !== undefined ? userData.copyRR        : 1;
-    var riskPct     = userData.copyRisk      !== undefined ? userData.copyRisk      : 10;
+    var userData  = snap.exists ? snap.data() : {};
+    var maxTrades = userData.copyMaxTrades !== undefined ? userData.copyMaxTrades : 2;
+    var rrRatio   = userData.copyRR        !== undefined ? userData.copyRR        : 1;
+    var riskPct   = userData.copyRisk      !== undefined ? userData.copyRisk      : 3;
     var sessionData = { maxTrades: maxTrades, rrRatio: rrRatio, riskPct: riskPct, count: 0 };
 
-    // Interval between pairs — spread maxTrades over the day
-    var pairInterval = Math.floor((24 * 60 * 60 * 1000) / Math.ceil(maxTrades / 2));
+    // ── Read today's already-fired trade count from Firestore ──
+    var todayStr = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+    var countDocId = userId + '_' + traderName.replace(/ /g,'_') + '_' + todayStr;
 
-    function scheduleNextPair() {
-      if (sessionData.count >= sessionData.maxTrades) return; // Daily limit reached
-      var jitter = (Math.random() - 0.5) * pairInterval * 0.4;
-      var delay  = Math.max(pairInterval + jitter, 60000);
-      _copyIntervals[sessionKey] = setTimeout(async function() {
-        if (!isMarketOpen()) { scheduleNextPair(); return; } // Market closed — skip
-        // Re-read config in case admin changed it
-        var freshSnap = await db.collection('users').doc(userId).get();
-        var freshData = freshSnap.exists ? freshSnap.data() : {};
-        sessionData.maxTrades = freshData.copyMaxTrades !== undefined ? freshData.copyMaxTrades : 5;
-        sessionData.rrRatio   = freshData.copyRR        !== undefined ? freshData.copyRR        : 1;
-        sessionData.riskPct   = freshData.copyRisk      !== undefined ? freshData.copyRisk      : 10;
-        if (sessionData.count >= sessionData.maxTrades) return;
-        var tradesToFire = Math.min(2, sessionData.maxTrades - sessionData.count);
+    db.collection('copyTradeCounts').doc(countDocId).get().then(function(countSnap) {
+      sessionData.count = (countSnap.exists && countSnap.data().count) ? countSnap.data().count : 0;
+
+      var pairInterval = Math.floor((24 * 60 * 60 * 1000) / Math.ceil(maxTrades / 2));
+
+      async function firePair(tradesToFire) {
         var promises = [];
         for (var i = 0; i < tradesToFire; i++) {
           promises.push(_executeCopyTrade(traderName, profile, userId, allocation, pricesObj, sessionData.rrRatio, sessionData.riskPct));
         }
         await Promise.all(promises);
         sessionData.count += tradesToFire;
-        scheduleNextPair();
-      }, delay);
-    }
-
-    // First pair fires within 30-60 seconds — only if market is open
-    var firstDelay = 30000 + Math.random() * 30000;
-    _copyIntervals[sessionKey] = setTimeout(async function() {
-      if (!isMarketOpen()) { scheduleNextPair(); return; } // Market closed — skip
-      var tradesToFire = Math.min(2, sessionData.maxTrades);
-      var promises = [];
-      for (var i = 0; i < tradesToFire; i++) {
-        promises.push(_executeCopyTrade(traderName, profile, userId, allocation, pricesObj, sessionData.rrRatio, sessionData.riskPct));
+        // Persist updated count to Firestore
+        db.collection('copyTradeCounts').doc(countDocId).set({ count: sessionData.count, date: todayStr }, { merge: true });
       }
-      await Promise.all(promises);
-      sessionData.count += tradesToFire;
-      scheduleNextPair();
-    }, firstDelay);
+
+      function scheduleNextPair() {
+        if (sessionData.count >= sessionData.maxTrades) return;
+        var jitter = (Math.random() - 0.5) * pairInterval * 0.4;
+        var delay  = Math.max(pairInterval + jitter, 60000);
+        _copyIntervals[sessionKey] = setTimeout(async function() {
+          if (!isMarketOpen()) { scheduleNextPair(); return; }
+          // Re-read config + count in case admin changed it or page reloaded
+          var freshSnap = await db.collection('users').doc(userId).get();
+          var freshData = freshSnap.exists ? freshSnap.data() : {};
+          sessionData.maxTrades = freshData.copyMaxTrades !== undefined ? freshData.copyMaxTrades : 5;
+          sessionData.rrRatio   = freshData.copyRR        !== undefined ? freshData.copyRR        : 1;
+          sessionData.riskPct   = freshData.copyRisk      !== undefined ? freshData.copyRisk      : 10;
+          // Re-read today's count from Firestore to survive refreshes
+          var freshCountSnap = await db.collection('copyTradeCounts').doc(countDocId).get();
+          sessionData.count = (freshCountSnap.exists && freshCountSnap.data().count) ? freshCountSnap.data().count : 0;
+          if (sessionData.count >= sessionData.maxTrades) return;
+          var tradesToFire = Math.min(2, sessionData.maxTrades - sessionData.count);
+          await firePair(tradesToFire);
+          scheduleNextPair();
+        }, delay);
+      }
+
+      // First pair — only fire if limit not already hit today
+      if (sessionData.count >= sessionData.maxTrades) return;
+      var firstDelay = 30000 + Math.random() * 30000;
+      _copyIntervals[sessionKey] = setTimeout(async function() {
+        if (!isMarketOpen()) { scheduleNextPair(); return; }
+        // Re-check count right before firing (another tab may have beaten us)
+        var guardSnap = await db.collection('copyTradeCounts').doc(countDocId).get();
+        sessionData.count = (guardSnap.exists && guardSnap.data().count) ? guardSnap.data().count : 0;
+        if (sessionData.count >= sessionData.maxTrades) { scheduleNextPair(); return; }
+        var tradesToFire = Math.min(2, sessionData.maxTrades - sessionData.count);
+        await firePair(tradesToFire);
+        scheduleNextPair();
+      }, firstDelay);
+    });
   });
 }
 

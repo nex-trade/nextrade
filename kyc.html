@@ -431,10 +431,42 @@
 <script>
   initTheme();
 
-  var selectedIdType = 'passport';
-  var fileDataFront   = null;  // base64 string
-  var fileDataBack    = null;
-  var currentUid      = null;
+var selectedIdType = 'passport';
+var fileDataFront   = null;
+var fileDataBack    = null;
+var currentUid      = null;
+
+// Compress image to under 500KB before saving
+function compressImage(file, callback) {
+  var maxSize = 480 * 1024; // 480KB target
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      var ctx = canvas.getContext('2d');
+      var quality = 0.8;
+      var scale = 1;
+      // Scale down if image is very large
+      var maxDim = 1200;
+      if (img.width > maxDim || img.height > maxDim) {
+        scale = Math.min(maxDim / img.width, maxDim / img.height);
+      }
+      canvas.width  = Math.floor(img.width  * scale);
+      canvas.height = Math.floor(img.height * scale);
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      // Reduce quality until under maxSize
+      var result = canvas.toDataURL('image/jpeg', quality);
+      while (result.length > maxSize && quality > 0.3) {
+        quality -= 0.1;
+        result = canvas.toDataURL('image/jpeg', quality);
+      }
+      callback(result);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
 
   // ── AUTH GATE ────────────────────────────────────────────────────────────
   auth.onAuthStateChanged(async function(user) {
@@ -483,39 +515,36 @@
 
   // ── FILE HANDLING ─────────────────────────────────────────────────────────
   function handleFile(side, input) {
-    var file = input.files[0];
-    if (!file) return;
-    if (file.size > 5 * 1024 * 1024) {
-      showKycError('File is too large. Maximum size is 5MB.');
-      input.value = '';
-      return;
-    }
-    var box      = document.getElementById('uploadBox' + (side === 'front' ? 'Front' : 'Back'));
-    var preview  = document.getElementById('preview' + (side === 'front' ? 'Front' : 'Back'));
-    var fname    = document.getElementById('filename' + (side === 'front' ? 'Front' : 'Back'));
-    var spinner  = document.getElementById('spinner' + (side === 'front' ? 'Front' : 'Back'));
-
-    spinner.style.display = 'block';
-    box.classList.add('uploading');
-
-    var reader = new FileReader();
-    reader.onload = function(e) {
-      var dataUrl = e.target.result;
-      if (side === 'front') { fileDataFront = dataUrl; }
-      else                  { fileDataBack  = dataUrl; }
-
-      preview.src = dataUrl;
-      preview.style.display = 'block';
-      fname.textContent = file.name;
-      fname.style.display = 'block';
-      spinner.style.display = 'none';
-      box.classList.remove('uploading');
-      box.classList.add('has-file');
-      hideKycError();
-      updateSubmitButton();
-    };
-    reader.readAsDataURL(file);
+  var file = input.files[0];
+  if (!file) return;
+  if (file.size > 10 * 1024 * 1024) {
+    showKycError('File is too large. Maximum size is 10MB.');
+    input.value = '';
+    return;
   }
+  var box     = document.getElementById('uploadBox' + (side === 'front' ? 'Front' : 'Back'));
+  var preview = document.getElementById('preview'   + (side === 'front' ? 'Front' : 'Back'));
+  var fname   = document.getElementById('filename'  + (side === 'front' ? 'Front' : 'Back'));
+  var spinner = document.getElementById('spinner'   + (side === 'front' ? 'Front' : 'Back'));
+
+  spinner.style.display = 'block';
+  box.classList.add('uploading');
+
+  compressImage(file, function(compressed) {
+    if (side === 'front') { fileDataFront = compressed; }
+    else                  { fileDataBack  = compressed; }
+
+    preview.src = compressed;
+    preview.style.display = 'block';
+    fname.textContent = file.name;
+    fname.style.display = 'block';
+    spinner.style.display = 'none';
+    box.classList.remove('uploading');
+    box.classList.add('has-file');
+    hideKycError();
+    updateSubmitButton();
+  });
+}
 
   function updateSubmitButton() {
     var btn = document.getElementById('submitKycBtn');

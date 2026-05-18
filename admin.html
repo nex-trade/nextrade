@@ -659,9 +659,9 @@
     });
     rows.sort((a,b) => (a.fullName||'').localeCompare(b.fullName||''));
     document.getElementById('copyConfigBody').innerHTML = rows.map(u => {
-      const maxTrades = u.copyMaxTrades !== undefined ? u.copyMaxTrades : 5;
+      const maxTrades = u.copyMaxTrades !== undefined ? u.copyMaxTrades : 2;
       const rr        = u.copyRR        !== undefined ? u.copyRR        : 1;
-      const risk      = u.copyRisk      !== undefined ? u.copyRisk      : 10;
+      const risk      = u.copyRisk      !== undefined ? u.copyRisk      : 3;
       return `<tr>
         <td style="font-weight:600;">${u.fullName||'—'}</td>
         <td class="mono" style="font-size:.78rem;">${u.accountId||'—'}</td>
@@ -681,9 +681,9 @@
   }
 
   async function saveCopyConfig(uid) {
-    const maxTrades = parseInt(document.getElementById('mt_' + uid).value)    || 5;
+    const maxTrades = parseInt(document.getElementById('mt_' + uid).value)    || 2;
     const rr        = parseFloat(document.getElementById('rr_' + uid).value)  || 1;
-    const risk      = parseFloat(document.getElementById('rk_' + uid).value)  || 10;
+    const risk      = parseFloat(document.getElementById('rk_' + uid).value)  || 3;
     try {
       await db.collection('users').doc(uid).update({ copyMaxTrades: maxTrades, copyRR: rr, copyRisk: risk });
       showToast('Copy config saved successfully.');
