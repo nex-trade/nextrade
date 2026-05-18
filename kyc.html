@@ -439,27 +439,17 @@ var currentUid      = null;
 // Compress image to under 500KB before saving
 
 function compressImage(file, callback) {
-  var maxSize = 300 * 1024; // 300KB hard target
   var reader = new FileReader();
   reader.onload = function(e) {
     var img = new Image();
     img.onload = function() {
       var canvas = document.createElement('canvas');
-      var ctx = canvas.getContext('2d');
-      // Force max dimension to 800px
-      var maxDim = 800;
-      var scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+      var maxDim = 1200;
+      var scale  = Math.min(maxDim / img.width, maxDim / img.height, 1);
       canvas.width  = Math.floor(img.width  * scale);
       canvas.height = Math.floor(img.height * scale);
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      // Start at 0.6 quality and keep reducing until under maxSize
-      var quality = 0.6;
-      var result  = canvas.toDataURL('image/jpeg', quality);
-      while (result.length > maxSize && quality > 0.1) {
-        quality = parseFloat((quality - 0.05).toFixed(2));
-        result  = canvas.toDataURL('image/jpeg', quality);
-      }
-      callback(result);
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+      canvas.toBlob(function(blob) { callback(blob); }, 'image/jpeg', 0.82);
     };
     img.src = e.target.result;
   };
@@ -515,8 +505,8 @@ function compressImage(file, callback) {
   function handleFile(side, input) {
   var file = input.files[0];
   if (!file) return;
-  if (file.size > 10 * 1024 * 1024) {
-    showKycError('File is too large. Maximum size is 10MB.');
+  if (file.size > 15 * 1024 * 1024) {
+    showKycError('File is too large. Maximum size is 15MB.');
     input.value = '';
     return;
   }
@@ -528,12 +518,18 @@ function compressImage(file, callback) {
   spinner.style.display = 'block';
   box.classList.add('uploading');
 
-  compressImage(file, function(compressed) {
-    if (side === 'front') { fileDataFront = compressed; }
-    else                  { fileDataBack  = compressed; }
-
-    preview.src = compressed;
+  // Show preview immediately from original file
+  var previewReader = new FileReader();
+  previewReader.onload = function(e) {
+    preview.src = e.target.result;
     preview.style.display = 'block';
+  };
+  previewReader.readAsDataURL(file);
+
+  // Compress and store blob for upload
+  compressImage(file, function(blob) {
+    if (side === 'front') { fileDataFront = blob; }
+    else                  { fileDataBack  = blob; }
     fname.textContent = file.name;
     fname.style.display = 'block';
     spinner.style.display = 'none';
@@ -558,61 +554,79 @@ function compressImage(file, callback) {
   }
 
   // ── SUBMIT KYC ───────────────────────────────────────────────────────────
+  
   async function submitKyc() {
-    if (!fileDataFront || !fileDataBack) {
-      showKycError('Please upload both front and back images of your ID.');
-      return;
-    }
-    var btn = document.getElementById('submitKycBtn');
-    btn.disabled = true;
-    btn.textContent = 'Submitting...';
-    btn.style.opacity = '.7';
-    hideKycError();
-
-    try {
-      // Check if auto-verify is enabled globally
-      var settingsSnap = await db.collection('settings').doc('kyc').get();
-      var autoVerify   = settingsSnap.exists && settingsSnap.data().autoVerify === true;
-
-      var status = autoVerify ? 'verified' : 'pending';
-
-      await db.collection('kyc').doc(currentUid).set({
-        userId:     currentUid,
-        idType:     selectedIdType,
-        frontImage: fileDataFront,
-        backImage:  fileDataBack,
-        status:     status,
-        submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-        reviewedAt:  autoVerify ? firebase.firestore.FieldValue.serverTimestamp() : null,
-        reviewNote:  autoVerify ? 'Auto-verified by system' : '',
-      });
-
-      // Update users doc with kyc status
-      await db.collection('users').doc(currentUid).update({
-        kycStatus: status,
-        kycSubmittedAt: firebase.firestore.FieldValue.serverTimestamp(),
-      });
-
-      if (autoVerify) {
-        showStatusBanner('verified');
-        markStep3Active();
-        showSubmittedSection({ frontImage: fileDataFront, backImage: fileDataBack, status: 'verified' }, false);
-        document.getElementById('kycUploadSection').style.display = 'none';
-        document.getElementById('kycTipsCard').style.display = 'none';
-      } else {
-        showStatusBanner('pending');
-        showSubmittedSection({ frontImage: fileDataFront, backImage: fileDataBack, status: 'pending' }, false);
-        document.getElementById('kycUploadSection').style.display = 'none';
-        document.getElementById('kycTipsCard').style.display = 'none';
-      }
-
-    } catch(e) {
-      showKycError('Submission failed: ' + e.message);
-      btn.disabled = false;
-      btn.textContent = 'Submit for Verification →';
-      btn.style.opacity = '1';
-    }
+  if (!fileDataFront || !fileDataBack) {
+    showKycError('Please upload both front and back images of your ID.');
+    return;
   }
+  var btn = document.getElementById('submitKycBtn');
+  btn.disabled = true;
+  btn.textContent = 'Submitting...';
+  btn.style.opacity = '.7';
+  hideKycError();
+
+  try {
+    var CLOUD_NAME  = 'dyyg1ighv';
+    var UPLOAD_PRESET = 'nextrade';
+
+    async function uploadToCloudinary(blob) {
+      var formData = new FormData();
+      formData.append('file', blob, 'kyc.jpg');
+      formData.append('upload_preset', UPLOAD_PRESET);
+      formData.append('folder', 'kyc/' + currentUid);
+      var res = await fetch('https://api.cloudinary.com/v1_1/' + CLOUD_NAME + '/image/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (!res.ok) throw new Error('Image upload failed.');
+      var data = await res.json();
+      return data.secure_url;
+    }
+
+    btn.textContent = 'Uploading images...';
+    var frontURL = await uploadToCloudinary(fileDataFront);
+    var backURL  = await uploadToCloudinary(fileDataBack);
+
+    btn.textContent = 'Saving...';
+    var settingsSnap = await db.collection('settings').doc('kyc').get();
+    var autoVerify   = settingsSnap.exists && settingsSnap.data().autoVerify === true;
+    var status = autoVerify ? 'verified' : 'pending';
+
+    await db.collection('kyc').doc(currentUid).set({
+      userId:      currentUid,
+      idType:      selectedIdType,
+      frontImage:  frontURL,
+      backImage:   backURL,
+      status:      status,
+      submittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+      reviewedAt:  autoVerify ? firebase.firestore.FieldValue.serverTimestamp() : null,
+      reviewNote:  autoVerify ? 'Auto-verified by system' : '',
+    });
+
+    await db.collection('users').doc(currentUid).update({
+      kycStatus: status,
+      kycSubmittedAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (autoVerify) {
+      showStatusBanner('verified');
+      markStep3Active();
+      showSubmittedSection({ frontImage: frontURL, backImage: backURL, status: 'verified' }, false);
+    } else {
+      showStatusBanner('pending');
+      showSubmittedSection({ frontImage: frontURL, backImage: backURL, status: 'pending' }, false);
+    }
+    document.getElementById('kycUploadSection').style.display = 'none';
+    document.getElementById('kycTipsCard').style.display = 'none';
+
+  } catch(e) {
+    showKycError('Submission failed: ' + e.message);
+    btn.disabled = false;
+    btn.textContent = 'Submit for Verification →';
+    btn.style.opacity = '1';
+  }
+}
 
   // ── UI HELPERS ────────────────────────────────────────────────────────────
   function showUploadSection(keepSubmittedVisible) {
