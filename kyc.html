@@ -429,6 +429,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 <script src="firebase-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 <script>
   initTheme();
 
@@ -439,14 +440,32 @@ var currentUid      = null;
 
 // Compress image to under 500KB before saving
 
-function compressImage(file, callback) {
+async function compressImage(file, callback) {
+  var processedFile = file;
+
+  // Convert HEIC/HEIF to JPEG first
+  if (
+    file.type === 'image/heic' ||
+    file.type === 'image/heif' ||
+    file.name.toLowerCase().endsWith('.heic') ||
+    file.name.toLowerCase().endsWith('.heif')
+  ) {
+    try {
+      var converted = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.82 });
+      processedFile = converted instanceof Blob ? converted : converted[0];
+    } catch(e) {
+      // If conversion fails, try anyway with original
+      processedFile = file;
+    }
+  }
+
   var reader = new FileReader();
   reader.onload = function(e) {
     var img = new Image();
     img.onload = function() {
       var canvas = document.createElement('canvas');
-      var maxDim = 1200;
-      var scale  = Math.min(maxDim / img.width, maxDim / img.height, 1);
+      var maxDim  = 1200;
+      var scale   = Math.min(maxDim / img.width, maxDim / img.height, 1);
       canvas.width  = Math.floor(img.width  * scale);
       canvas.height = Math.floor(img.height * scale);
       canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
@@ -454,8 +473,9 @@ function compressImage(file, callback) {
     };
     img.src = e.target.result;
   };
-  reader.readAsDataURL(file);
+  reader.readAsDataURL(processedFile);
 }
+
 
   // ── AUTH GATE ────────────────────────────────────────────────────────────
   auth.onAuthStateChanged(async function(user) {
